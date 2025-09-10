@@ -5,8 +5,9 @@ from sfepy.discrete import (Material, FieldVariable, Integral, Equation, Equatio
 from sfepy.terms import Term
 from sfepy.discrete import Problem
 from sfepy.mechanics.matcoefs import stiffness_from_youngpoisson
-from sfepy.discrete.fem import FEDomain  
+from sfepy.discrete.fem import FEDomain
 from sfepy.discrete.conditions import EssentialBC
+from util import sloped_plane_condition
 from sfepy import data_dir
 
 
@@ -17,19 +18,23 @@ def load_Domain_sfepy(mesh_filename):
     omega = domain.create_region('Omega', 'all')
     return domain, omega
 
-
+#Generate boundries, these will be used to fix the edges of the gripper so that they dont move when applying force
 def generate_regions(domain):
-    #Generate boundries, these will be used to fix the edges of the gripper so that they dont move when applying force
-    Gamma_left = domain.create_region('Gamma_Left', 'vertices in (x < 1e-6)', 'facet')
+    Gamma_short_side = domain.create_region('Gamma_short_side', 
+                                            'vertices in (z >= -1e-6) & (z <= 1e-6)', 
+                                            'facet')
 
-    #This region will represent the small surface in which the force will be applied
-    Gamma_right_point = domain.create_region(
-        'Gamma_Right_Point',
-        'vertices in (x > 1-1e-6) & (y > 0.32-1e-6) & (y < 0.33+1e-6) & (z > 0.5-1e-6) & (z < 0.5+1e-6)',
-        'vertex'
-    )
+    user_functions = {
+    'sloped_plane_condition': sloped_plane_condition
+    }
+    Gamma_hypotenuse = domain.create_region('Gamma_hypotenuse',
+                                        'vertices by sloped_plane_condition',
+                                        'vertex',
+                                        functions=user_functions)
 
-    return [Gamma_left, Gamma_right_point]
+    
+
+    return {"Gamma_short_side": Gamma_short_side, "Gamma_hypotenuse": Gamma_hypotenuse}
 
 
 
