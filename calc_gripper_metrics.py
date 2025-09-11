@@ -6,8 +6,11 @@ from sfepy.terms import Term
 from sfepy.discrete import Problem
 from sfepy.mechanics.matcoefs import stiffness_from_youngpoisson
 from sfepy.discrete.fem import FEDomain
-from sfepy.discrete.conditions import EssentialBC
-from util import sloped_plane_condition
+from sfepy.discrete.conditions import EssentialBC, Conditions
+from sfepy.solvers.ls import ScipyDirect
+from sfepy.solvers.nls import Newton 
+from sfepy.base.base import IndexedStruct
+from util import sloped_plane_condition, force_plane_condition
 from sfepy import data_dir
 
 
@@ -22,25 +25,33 @@ def load_Domain_sfepy(mesh_filename):
 def generate_regions(domain):
     Gamma_short_side = domain.create_region('Gamma_short_side', 
                                             'vertices in (z >= -1e-6) & (z <= 1e-6)', 
-                                            'facet')
+                                            'vertex')
 
     user_functions = {
-    'sloped_plane_condition': sloped_plane_condition
+    'sloped_plane_condition': sloped_plane_condition,
+    'force_plane_condition': force_plane_condition
     }
+
     Gamma_hypotenuse = domain.create_region('Gamma_hypotenuse',
                                         'vertices by sloped_plane_condition',
                                         'vertex',
                                         functions=user_functions)
+    
+    Gamma_force_region = domain.create_region('Gamma_force_region', 
+                                              'vertices by force_plane_condition',
+                                              'facet',
+                                              functions=user_functions)
 
     
 
-    return {"Gamma_short_side": Gamma_short_side, "Gamma_hypotenuse": Gamma_hypotenuse}
-
+    return {"Gamma_short_side": Gamma_short_side, 
+            "Gamma_hypotenuse": Gamma_hypotenuse, 
+            'Gamma_force_region': Gamma_force_region}
 
 
 def calc_gripper_results(omega, regions):
 
-    field = Field.from_args('displacement', np.float64, 'vector', omega, approx_order=1)
+    field = Field.from_args('gripper_field', np.float64, 'vector', omega, approx_order=1)
 
 
     #Generate field variables for use in computation: unknown will refer to the displacement
@@ -53,20 +64,48 @@ def calc_gripper_results(omega, regions):
     D = stiffness_from_youngpoisson(3, young, poisson)
 
     #TPU Material object
-    material = Material('solid', D=D)
+    material = Material('m', D=D)
 
-    term = Term.new('dw_lin_elastic(solid.D, v, u)', integral='i', region=omega, solid=material, v=v, u=u)
+    integral = Integral('i', order=2)
 
-    #Fixing the left edge, when using the gripper CAD, two conditions will be made to fix the two outer faces
-    fix = EssentialBC('fix', Gamma_left, {'u.all': 0.0})
+    force_val = -5.0 
+    force = Material('force', values={'val': np.array([[force_val], [0.0], [0.0]])})
 
-    f = Material('f', val=[[5.0]])  # force vector
+    t1 = Term.new('dw_lin_elastic(m.D, v, u)', integral, omega, m=material, v=v, u=u)
+    t2 = Term.new('dw_surface_ltr(force.val, v)', integral, regions["Gamma_force_region"], force=force, v=v)
 
-    #applies the 5N force vector on the Gamma_right_point region which in this case will represent the compliant face of the 
-    #gripper
-    
-    term_force = Term.new('dw_point_load(v, f)', integral='i', region=Gamma_right_point, v=v, f=f)
-    
+    eq = Equation('balance', t1 + t2)
+    eqs = Equations([eq])
+
+    #Fixing the edges, when using the gripper CAD, two conditions will be made to fix the two outer faces
+    fix_short_side = EssentialBC('fix_short_side', regions["Gamma_short_side"], {'u.all' : 0.0})
+    fix_hypotenuse = EssentialBC('fix_hypotenuse', regions["Gamma_hypotenuse"], {'u.all' : 0.0})
+
+    ls = ScipyDirect({})
+    nls_status = IndexedStruct()
+    nls = Newton({}, lin_solver=ls, status=nls_status)
+
+    pb = Problem('compliant_gripper_metrics', equations=eqs)
+    pb.set_bcs(ebcs=Conditions([fix_short_side, fix_hypotenuse]))
+
+    pb.set_solver(nls)
+    status = IndexedStruct()
+    variables = pb.solve(status=status)
+
+    stress = pb.evaluate(
+    'ev_cauchy_stress.i.Omega(m.D, u)',
+    'Omega',
+    mode='el_avg',
+    u=variables,
+    m=material,                 
+    integrals={'i': integral},  
+    )
+
+    u_var = variables['u']       
+    disp_array = u_var.data[0]   
+    disp = disp_array.reshape((-1, u_var.n_components))  
+
+    return stress, disp
 
 
 

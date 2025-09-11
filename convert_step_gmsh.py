@@ -7,7 +7,6 @@ def convert_to_mesh(STEP_file_path):
 
     STEP_path = f"STEP_files/{STEP_file_path}.step"
 
-    #If the mesh has already been created dont rerun the msh code
     if not os.path.exists(f"msh_files/{STEP_file_path}.msh"):
 
         gmsh.initialize()
@@ -15,14 +14,19 @@ def convert_to_mesh(STEP_file_path):
         gmsh.open(STEP_path)
 
         lc_min = 0.5   
-        lc_max = 2.0
+        lc_max = 1.0
 
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc_min)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc_max)
+
+        # Force tetrahedral mesh only
+        gmsh.option.setNumber("Mesh.Algorithm3D", 4)  # Delaunay = tetra only
+
         gmsh.model.mesh.generate(3)
+        elem_types = gmsh.model.mesh.getElementTypes(dim=3)
+        print("3D element types (gmsh):", elem_types)   # expect something like [4]
 
-
-        #Sfepy is only compatible with the 2.2 version
+        # Sfepy is only compatible with MSH v2.2
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
         gmsh.write(f"msh_files/{STEP_file_path}.msh")
 
@@ -30,5 +34,3 @@ def convert_to_mesh(STEP_file_path):
 
     else:
         print("mesh file already created")
-
-
