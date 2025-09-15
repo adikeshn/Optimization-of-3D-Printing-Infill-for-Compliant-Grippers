@@ -13,18 +13,18 @@ def convert_to_mesh(STEP_file_path):
         gmsh.option.setNumber("General.Terminal", 1)
         gmsh.open(STEP_path)
 
-        lc_min = 0.5   
-        lc_max = 1.0
+        lc_min = 1.104
+        lc_max = 1.105
 
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc_min)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc_max)
 
         # Force tetrahedral mesh only
-        gmsh.option.setNumber("Mesh.Algorithm3D", 4)  # Delaunay = tetra only
+        gmsh.option.setNumber("Mesh.Algorithm3D", 4)  
 
         gmsh.model.mesh.generate(3)
         elem_types = gmsh.model.mesh.getElementTypes(dim=3)
-        print("3D element types (gmsh):", elem_types)   # expect something like [4]
+        print("3D element types (gmsh):", elem_types)  
 
         # Sfepy is only compatible with MSH v2.2
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)

@@ -46,10 +46,11 @@ def generate_regions(domain):
 
     return {"Gamma_short_side": Gamma_short_side, 
             "Gamma_hypotenuse": Gamma_hypotenuse, 
-            'Gamma_force_region': Gamma_force_region}
+            'Gamma_force_region': Gamma_force_region,
+        }
 
 
-def calc_gripper_results(omega, regions):
+def calc_gripper_results(omega, regions, force_area):
 
     field = Field.from_args('gripper_field', np.float64, 'vector', omega, approx_order=1)
 
@@ -59,8 +60,8 @@ def calc_gripper_results(omega, regions):
     v = FieldVariable('v', 'test', field, primary_var_name='u')
 
     #TPU material constants for use in FEA analysis: might not be exactly correct but will verify later
-    young = 30e6
-    poisson = 0.45    
+    young = 210000
+    poisson = 0.3   
     D = stiffness_from_youngpoisson(3, young, poisson)
 
     #TPU Material object
@@ -68,7 +69,7 @@ def calc_gripper_results(omega, regions):
 
     integral = Integral('i', order=2)
 
-    force_val = -5.0 
+    force_val = -5.0/force_area
     force = Material('force', values={'val': np.array([[force_val], [0.0], [0.0]])})
 
     t1 = Term.new('dw_lin_elastic(m.D, v, u)', integral, omega, m=material, v=v, u=u)
@@ -101,10 +102,10 @@ def calc_gripper_results(omega, regions):
     integrals={'i': integral},  
     )
 
-    u_var = variables['u']       
-    disp_array = u_var.data[0]   
-    disp = disp_array.reshape((-1, u_var.n_components))  
-
+    u_var = variables['u']
+    disp_array = np.array(u_var.data)  
+    disp = disp_array.reshape((-1, u_var.n_components))
+    
     return stress, disp
 
 
