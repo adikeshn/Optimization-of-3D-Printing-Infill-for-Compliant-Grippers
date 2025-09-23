@@ -10,7 +10,7 @@ from sfepy.discrete.conditions import EssentialBC, Conditions
 from sfepy.solvers.ls import ScipyDirect
 from sfepy.solvers.nls import Newton 
 from sfepy.base.base import IndexedStruct
-from util import sloped_plane_condition, force_plane_condition
+from project.util import sloped_plane_condition, force_plane_condition
 from sfepy import data_dir
 
 

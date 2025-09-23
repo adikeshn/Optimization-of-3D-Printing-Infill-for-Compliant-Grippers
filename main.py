@@ -1,6 +1,6 @@
-from convert_step_gmsh import convert_to_mesh
-from calc_gripper_metrics import load_Domain_sfepy, generate_regions, calc_gripper_results
-from util import plotPoints, computePseudoCGS, calc_force_area, plotDisplacement, fusionAccuracy
+from project.convert_step_gmsh import convert_to_mesh
+from project.calc_gripper_metrics import load_Domain_sfepy, generate_regions, calc_gripper_results
+from project.util import plotPoints, computePseudoCGS, calc_force_area, plotDisplacement, fusionAccuracy
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -20,6 +20,6 @@ stress, disp = calc_gripper_results(omega, regions_dict, force_area)
 von_mises, disp = computePseudoCGS(disp, stress)
 print("von_mises", max(von_mises))
 print("displacement", max(np.linalg.norm(disp, axis=1)))
-print(fusionAccuracy(max(von_mises), max(np.linalg.norm(disp, axis=1)), 0.196, 6.144e-6))
+print(fusionAccuracy(max(von_mises), max(np.linalg.norm(disp, axis=1)), 0.214, 6.223e-6))
 plotDisplacement(coors, disp)
 
