@@ -4,6 +4,8 @@ from project.util import plotPoints, computePseudoCGS, calc_force_area, plotDisp
 import matplotlib.pyplot as plt
 import numpy as np
 
+#Commands conda activate fea, jupyter lab
+
 convert_to_mesh("GripperForOpt_v2")
 
 domain, omega = load_Domain_sfepy("GripperForOpt_v2")
