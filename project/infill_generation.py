@@ -35,8 +35,6 @@ def create_triangle_outline(part, outer_thickness=1):
     return hollow_triangle, inner, inner_vol
 
 
-
-
 def hexagon_func(side_length, thickness, cut=True):
     pts = []
     for i in range(6):
@@ -44,30 +42,38 @@ def hexagon_func(side_length, thickness, cut=True):
         pts.append((math.cos(angle) * side_length,
                     math.sin(angle) * side_length))
     
-    hexagon = cq.Workplane("XZ").polyline(pts + [pts[0]]).close().extrude(-20)
+    hexagon = cq.Workplane("XZ").polyline(pts + [pts[0]]).close().extrude(-10)
     hexagon = hexagon.rotate((0,0,0), (0, 1, 0), 30)
     if cut:
         hexagon = hexagon.cut(hexagon_func(side_length-thickness, thickness, cut=False))
         
     return hexagon
     
-def get_honeycomb_infill(part, outline, side_length = 3, wall_thickness = 0.45):
+def get_honeycomb_infill(part, side_length = 0, density = 20, rod_diameter = 0.45, outline_thickness = 0.87):
 
+    outline, inner, inner_vol = create_triangle_outline(part, outer_thickness=outline_thickness)
 
+    a = 71.975
+    b = -0.422
+    c = 6.404
+
+    if (side_length == 0):
+        side_length = density_to_spacing(density, a, b, c)
+    
     width = 50
-    layers = math.ceil(40/(side_length))
-    thickness = 20
+    layers = math.ceil(36/(side_length))
+    thickness = 10
     grid = cq.Workplane("XZ")
     space = math.sin(math.pi/3) * side_length
     
     for layer in range(layers):
         
         x = 0
-        spacing = (math.cos(math.pi / 6) * side_length- (wall_thickness / 2)) if layer % 2 == 1 else 0
+        spacing = (math.cos(math.pi / 6) * side_length- (rod_diameter / 2)) if layer % 2 == 1 else 0
         while x >= -width/2:
-            grid = grid.union(hexagon_func(side_length, wall_thickness).
-                translate((x + spacing, 0, 40 - layer * (1.5 * side_length - wall_thickness))))
-            x -= space*2 - wall_thickness
+            grid = grid.union(hexagon_func(side_length, rod_diameter).
+                translate((x + spacing, 0, 36 - layer * (1.5 * side_length - rod_diameter))))
+            x -= space*2 - rod_diameter
 
 
     grid = grid.rotate((0, 0, 0), (0, 1, 0), -5)
@@ -75,8 +81,9 @@ def get_honeycomb_infill(part, outline, side_length = 3, wall_thickness = 0.45):
     infill_inside = grid.intersect(part)
     
     result = outline.union(infill_inside)
+    infill_volume = infill_inside.val().Volume()
 
-    return result, get_density(infill_inside)
+    return result, infill_volume / inner_vol * 100
 
 
 def get_grid_infill(part, density = 50, rod_diameter = 0.45, spacing = 0, outline_thickness = 0.87):
@@ -198,7 +205,7 @@ def get_finray_infill(part, density = 25, spacing = 0, rod_diameter = 0.45, outl
     depth = 70
     thickness = 20
 
-    outline, inner, inner_area = create_triangle_outline(part, outer_thickness=outline_thickness)
+    outline, inner, inner_vol = create_triangle_outline(part, outer_thickness=outline_thickness)
     
     a = 70.353
     b = -0.618
@@ -224,9 +231,9 @@ def get_finray_infill(part, density = 25, spacing = 0, rod_diameter = 0.45, outl
     
     result = outline.union(infill_inside)
     
-    
-    
-    return result, get_density(infill_inside)/inner_area * 100
+    infill_volume = infill_inside.val().Volume()
+
+    return result, infill_volume/inner_vol * 100
 
 def density_to_spacing(y, a, b, c):
     if (y - c) / a <= 0:

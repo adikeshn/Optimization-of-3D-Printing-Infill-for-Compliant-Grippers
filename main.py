@@ -28,7 +28,6 @@ def model_cad(step_path):
     von_mises, disp = computePseudoCGS(disp, stress)
     print("von_mises", max(von_mises))
     print("displacement", max(np.linalg.norm(disp, axis=1)))
-    print(fusionAccuracy(max(von_mises), max(np.linalg.norm(disp, axis=1)), 0.214, 6.223e-6))
     plotDisplacement(coors, disp)
 
 
@@ -40,12 +39,12 @@ def main():
     infill_thickness = 0.45
 
     part = cq.importers.importStep("./STEP_files/GripperForOpt_v2.step")
-    infill, density = get_triangle_infill(part, density = 40, 
+    print("Generating infill.....")
+    infill, density = get_finray_infill(part, density = 20, 
                         rod_diameter = infill_thickness, 
                         outline_thickness=triangle_outline_thickness)
-    print(density)
-    exporters.export(infill, "./STEP_files/triangle_density40.step")
-    model_cad("triangle_density40")
+    exporters.export(infill, "./STEP_files/fin20.step")
+    model_cad("fin20")
 
 
 main()
