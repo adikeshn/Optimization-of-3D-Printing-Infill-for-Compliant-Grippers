@@ -90,7 +90,7 @@ def force_plane_condition(coors, domain=None):
     y = coors[:, 1]
 
     radius = (max(y) - min(y))/2
-    center_z = (max(z) - min(z))/2
+    center_z = (max(z) - min(z))/3
     val = (y - radius) * (y - radius) + (z-center_z) * (z-center_z) - radius * radius   
     
     condition_one = np.logical_and(x >= -1e-1, x <= 1e-1)
