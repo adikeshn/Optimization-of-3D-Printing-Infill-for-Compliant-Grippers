@@ -1,6 +1,6 @@
 from project.convert_step_gmsh import convert_to_mesh
 from project.calc_gripper_metrics import load_Domain_sfepy, generate_regions, calc_gripper_results
-from project.util import plotPoints, computePseudoCGS, calc_force_area, plotDisplacement, minmax
+from project.util import plotPoints, computePseudoCGS, calc_force_area, plotDisplacement, minmax, fusionAccuracy
 from project.infill_generation import get_grid_infill, get_honeycomb_infill, get_triangle_infill, get_finray_infill
 import matplotlib.pyplot as plt
 import cadquery as cq
@@ -11,11 +11,11 @@ import os
 #Commands conda activate fea, jupyter lab
 
 
-def model_cad(step_path, plot = False):
+def model_cad(step_path, mesh_size, plot = False):
 
-    convert_to_mesh(step_path)
+    convert_to_mesh(step_path, mesh_size)
 
-    domain, omega = load_Domain_sfepy(step_path)
+    domain, omega = load_Domain_sfepy(step_path+str(mesh_size))
     coors = domain.mesh.coors
 
     regions_dict = generate_regions(domain)
@@ -61,17 +61,16 @@ def get_metrics(part, infill_type, den, plt = False):
         
     exporters.export(infill, f"./STEP_files/{infill_file_name}.step")
 
-    return model_cad(infill_file_name, plot = plt)
+    return model_cad(infill_file_name, plot = plt), density
 
 
 def main():
 
-    init_path = "./STEP_files/GripperForOpt_v2"
+    init_path = "./STEP_files/GripperForOpt_v2.step"
 
-    part = cq.importers.importStep("./STEP_files/GripperForOpt_v2.step")
+    part = cq.importers.importStep(init_path)
     print("Generating infill.....")
 
-    disp_vals, stress_vals, pseudo_cgs = [], [], []
     densities = {
         "grid": (11.5, 23.8, 39.2),
         "honeycomb": (8.7, 18.68, 29.8),
@@ -79,23 +78,30 @@ def main():
         "finray": (13.0, 24.0, 36.0)
     }
 
-    for key in densities:
-        for den_val in densities[key]:
-            mets = get_metrics(part, key, den_val, plt=False)
-            stress_vals.append(mets[0])
-            disp_vals.append(mets[1])
+    da = model_cad("finray24.0", 0.48, plot = True)
+    print(da)
+    
 
-    stress_vals = minmax(stress_vals)
-    disp_vals = minmax(disp_vals)
+    # keys_list = list(densities.keys())
+    #disp_vals, stress_vals, pseudo_cgs, accur = [], [], [], []
+    # for key in densities:
+    
+    #     for den_val in densities[key]:
+    #         mets, density = get_metrics(part, key, den_val, plt=False)
+    #         stress_vals.append(mets[0])
+    #         disp_vals.append(mets[1])
+    #         accur.append(100 - ((np.abs(density - den_val) / den_val) * 100))
 
-    for i in range(len(disp_vals)):
-        pseudo_cgs.append((disp_vals[i] + (1-stress_vals[i]))/2)
+    # minmax_stress_vals = minmax(stress_vals)
+    # minmax_disp_vals = minmax(disp_vals)
 
-    sorted_with_index = (sorted(enumerate(pseudo_cgs), key=lambda x: x[1], reverse=True))
+    # for i in range(len(disp_vals)):
+    #     pseudo_cgs.append((minmax_disp_vals[i] + (1-minmax_stress_vals[i]))/2)
 
-    print(sorted_with_index)
-    print(stress_vals)
-    print(disp_vals)
+    # sorted_with_index = (sorted(enumerate(pseudo_cgs), key=lambda x: x[1], reverse=True))
+
+    # for (index, pseudo) in sorted_with_index:
+    #     print(f"{index} || Pseudo: {pseudo} || Stress: {stress_vals[index]} || Disp: {disp_vals[index]}, || Accur {accur[index]}")
 
 
 

@@ -3,19 +3,19 @@ import numpy as np
 import sys
 import os
 
-def convert_to_mesh(STEP_file_path):
+def convert_to_mesh(STEP_file_path, mesh_size):
 
     STEP_path = f"STEP_files/{STEP_file_path}.step"
 
-    if not os.path.exists(f"msh_files/{STEP_file_path}.msh"):
+    if not os.path.exists(f"msh_files/{STEP_file_path}{mesh_size}.msh"):
 
         gmsh.initialize()
         gmsh.option.setNumber("General.Terminal", 1)
         gmsh.open(STEP_path)
 
-        lc_min = 1.104
-        lc_max = 1.105
-
+        lc_min = mesh_size
+        lc_max = mesh_size+0.01
+ 
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", lc_min)
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc_max)
 
@@ -28,7 +28,7 @@ def convert_to_mesh(STEP_file_path):
 
         # Sfepy is only compatible with MSH v2.2
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
-        gmsh.write(f"msh_files/{STEP_file_path}.msh")
+        gmsh.write(f"msh_files/{STEP_file_path}{mesh_size}.msh")
 
         gmsh.finalize()
 

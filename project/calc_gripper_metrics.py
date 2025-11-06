@@ -60,8 +60,8 @@ def calc_gripper_results(omega, regions, force_area):
     v = FieldVariable('v', 'test', field, primary_var_name='u')
 
     #TPU material constants for use in FEA analysis: might not be exactly correct but will verify later
-    young = 12 # in Mpa
-    poisson = 0.45 
+    young = 210000 # in Mpa
+    poisson = 0.3 
     D = stiffness_from_youngpoisson(3, young, poisson)
 
     #TPU Material object
