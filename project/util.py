@@ -32,13 +32,13 @@ def plotPoints(coors, regions_dict=None, equalScale=True):
 
     plt.show()
 
-def plotDisplacement(coors, u, equalScale=True):
-    
-
+def plotDisplacement(coors, u, equalScale=True, scale=-1.0):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    deformed = coors
+    deformed = coors + scale * u
+    print(coors[30])
+    print(deformed[30])
 
     disp_mag = np.linalg.norm(u, axis=1)
 
@@ -46,11 +46,10 @@ def plotDisplacement(coors, u, equalScale=True):
                     c=disp_mag, cmap="viridis", s=8)
     plt.colorbar(sc, ax=ax, label="Displacement magnitude")
 
-
     if equalScale:
-        x_limits = [np.min(coors[:,0]), np.max(coors[:,0])]
-        y_limits = [np.min(coors[:,1]), np.max(coors[:,1])]
-        z_limits = [np.min(coors[:,2]), np.max(coors[:,2])]
+        x_limits = [np.min(deformed[:,0]), np.max(deformed[:,0])]
+        y_limits = [np.min(deformed[:,1]), np.max(deformed[:,1])]
+        z_limits = [np.min(deformed[:,2]), np.max(deformed[:,2])]
 
         all_limits = np.array([x_limits, y_limits, z_limits])
         min_limit = all_limits[:,0].min()
@@ -61,6 +60,7 @@ def plotDisplacement(coors, u, equalScale=True):
         ax.set_zlim(min_limit, max_limit)
 
     plt.show()
+
 
 
 def sloped_plane_condition(coors, domain=None):
@@ -95,7 +95,7 @@ def force_plane_condition(coors, domain=None):
     
     condition_one = np.logical_and(x >= -1e-1, x <= 1e-1)
 
-    indices = np.where(np.logical_and(condition_one, val <= 1.5))[0]
+    indices = np.where(np.logical_and(condition_one, val <= 0.5))[0]
 
     return indices
 

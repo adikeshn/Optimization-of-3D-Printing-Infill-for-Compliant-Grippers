@@ -25,7 +25,7 @@ def load_Domain_sfepy(mesh_filename):
 def generate_regions(domain):
     Gamma_short_side = domain.create_region('Gamma_short_side', 
                                             'vertices in (z >= -1e-6) & (z <= 1e-6)', 
-                                            'vertex')
+                                            'facet')
 
     user_functions = {
     'sloped_plane_condition': sloped_plane_condition,
@@ -34,7 +34,7 @@ def generate_regions(domain):
 
     Gamma_hypotenuse = domain.create_region('Gamma_hypotenuse',
                                         'vertices by sloped_plane_condition',
-                                        'vertex',
+                                        'facet',
                                         functions=user_functions)
     
     Gamma_force_region = domain.create_region('Gamma_force_region', 
@@ -60,8 +60,8 @@ def calc_gripper_results(omega, regions, force_area):
     v = FieldVariable('v', 'test', field, primary_var_name='u')
 
     #TPU material constants for use in FEA analysis: might not be exactly correct but will verify later
-    young = 210000 # in Mpa
-    poisson = 0.3 
+    young = 12 # in Mpa
+    poisson = 0.45 
     D = stiffness_from_youngpoisson(3, young, poisson)
 
     #TPU Material object
