@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 from sim.sim import run_sims
 from pathlib import Path
+import os
 
 app = Flask(__name__)
 
@@ -12,6 +13,7 @@ def home():
 def run_simulation():
 
     data = request.json
+    step_file = request.files["step_file"]
 
     base_dir = Path("./jobs")
     base_dir.mkdir(exist_ok=True)
@@ -23,7 +25,14 @@ def run_simulation():
     new_folder_path = base_dir / new_folder_name
 
     new_folder_path.mkdir(exist_ok=True)
-    res = run_sims(job_num, data)
+
+    Path(f"./jobs/job_{job_num}/infills").mkdir(parents=True, exist_ok=True)
+    Path(f"./jobs/job_{job_num}/meshs").mkdir(parents=True, exist_ok=True)
+
+    upload_path = f"./jobs/job_{job_num}/part.step"
+    step_file.save(upload_path)
+
+    res = run_sims(job_num, data["sim_space"])
 
     return jsonify({
         "status": "complete",
