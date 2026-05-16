@@ -1,4 +1,66 @@
-sfepy-env/
-venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# React / Vite
+project/site/node_modules/
+project/site/dist/
+project/site/.vite/
+
+# Simulation job outputs
+project/jobs/
+project/uploads/
+project/results/
+
+# CAD / mesh / FEA generated files
+*.step
+*.stp
+*.stl
+*.obj
+*.msh
+*.vtk
+*.vtu
+*.xdmf
+*.h5
+*.med
+*.inp
+
+# Logs
+*.log
+logs/
+
+# Celery / Redis local files
+celerybeat-schedule
+dump.rdb
+
+# Large result/data files
+*.csv
+*.jsonl
+*.npy
+*.npz
+*.pkl

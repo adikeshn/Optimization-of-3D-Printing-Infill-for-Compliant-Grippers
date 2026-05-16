@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory
-from sim.sim import run_sims
 from pathlib import Path
+import cadquery as cq
+from tasks import run_simulation_task
 import shutil
 import json
 import os
@@ -39,57 +40,109 @@ def get_jobs():
         "jobs": jobs
     })
 
-
-@app.route("/jobs/<job_name>/infills/<step_file>", methods=["GET"])
-def get_infill_step_file(job_name, step_file):
+@app.route("/jobs/<job_name>/infills/<step_file>/download", methods=["GET"])
+def download_infill_step_file(job_name, step_file):
     return send_from_directory(
         JOBS_DIR / job_name / "infills",
         step_file,
+        as_attachment=True
+    )
+
+@app.route("/jobs/<job_name>/infills/<step_file>", methods=["GET"])
+def get_infill_stl_file(job_name, step_file):
+    step_dir = JOBS_DIR / job_name / "infills"
+    if not (step_dir / f"{step_file[:-5]}.stl").exists():
+        model = cq.importers.importStep(str(step_dir / step_file))
+        cq.exporters.export(model, str(step_dir / f"{step_file[:-5]}.stl"))
+     
+    return send_from_directory(
+        JOBS_DIR / job_name / "infills",
+        f"{step_file[:-5]}.stl",
         as_attachment=False
     )
 
 @app.route("/run", methods=["POST"])
 def run_simulation():
+    JOBS_DIR.mkdir(exist_ok=True)
 
-    sim_space = json.loads(request.form["sim_space"])
-    step_file = request.files["step_file"]
+    existing_jobs = [
+        int(job.name.split("_")[1])
+        for job in JOBS_DIR.glob("job_*")
+        if job.name.split("_")[1].isdigit()
+    ]
 
-    base_dir = Path("./jobs")
-    base_dir.mkdir(exist_ok=True)
+    job_num = max(existing_jobs, default=-1) + 1
+    job_name = f"job_{job_num}"
+    job_dir = JOBS_DIR / job_name
+    job_dir.mkdir(exist_ok=False)
+    (job_dir / "infills").mkdir(parents=True, exist_ok=True)
+    (job_dir / "meshs").mkdir(parents=True, exist_ok=True)
+    try:
+        step_file = request.files["step_file"]
+        sim_space = json.loads(request.form["sim_space"])
 
-    existing_jobs = list(base_dir.glob("job_*"))
-    job_num = len(existing_jobs) + 1
+        step_file.save(job_dir / "base_part.step")
 
-    new_folder_name = f"job_{job_num}"
-    new_folder_path = base_dir / new_folder_name
+        with open(job_dir / "sim_space.json", "w") as f:
+            json.dump(sim_space, f, indent=2)
 
-    new_folder_path.mkdir(exist_ok=True)
+        with open(job_dir / "status.json", "w") as f:
+            json.dump({"status": "queued", "error": None}, f, indent=2)
 
-    Path(f"./jobs/job_{job_num}/infills").mkdir(parents=True, exist_ok=True)
-    Path(f"./jobs/job_{job_num}/meshs").mkdir(parents=True, exist_ok=True)
-
-    upload_path = f"./jobs/job_{job_num}/part.step"
-    step_file.save(upload_path)
-    try: 
-        res = run_sims(job_num, sim_space)
-        metrics_path = JOBS_DIR / f"job_{job_num}" / "metrics.json"
-
-        with open(metrics_path, "w") as f:
-            json.dump(res, f, indent=2)
+        task = run_simulation_task.delay(job_num)
 
         return jsonify({
-            "status": "complete",
-            "job": f"job_{job_num}",
-            "metrics": res
+            "status": "queued",
+            "job": job_name,
+            "task_id": task.id,
+            "metrics": None,
         })
-    except:
-        shutil.rmtree(f'./jobs/job_{job_num}')
+
+    except Exception as e:
+        shutil.rmtree(job_dir)
+
         return jsonify({
-            "status": "incomplete",
-            "metrics": None
-        })
-        
-    
+            "status": "failed",
+            "job": job_name,
+            "error": str(e),
+            "metrics": None,
+        }), 500
+
+@app.route("/jobs/<job_name>", methods=["GET"])
+def get_job(job_name):
+    job_dir = JOBS_DIR / job_name
+
+    if not job_dir.exists():
+        return jsonify({
+            "status": "not_found",
+            "job": job_name,
+            "metrics": None,
+        }), 404
+
+    status_path = job_dir / "status.json"
+    metrics_path = job_dir / "metrics.json"
+
+    status = "unknown"
+    error = None
+    metrics = None
+
+    if status_path.exists():
+        with open(status_path, "r") as f:
+            status_data = json.load(f)
+
+        status = status_data.get("status", "unknown")
+        error = status_data.get("error")
+
+    if metrics_path.exists():
+        with open(metrics_path, "r") as f:
+            metrics = json.load(f)
+
+    return jsonify({
+        "job": job_name,
+        "status": status,
+        "error": error,
+        "metrics": metrics,
+    })
 
 @app.route("/assets/<path:path>", methods=["GET"])
 def assets(path):

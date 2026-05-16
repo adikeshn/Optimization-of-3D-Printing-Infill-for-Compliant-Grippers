@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import { Canvas } from "@react-three/fiber";
+import { OrbitControls, Center } from "@react-three/drei";
+import { STLLoader } from "three-stdlib";
+import { useLoader } from "@react-three/fiber";
 
 const INFILLS = [
   { label: "Grid", value: "grid" },
@@ -7,15 +11,31 @@ const INFILLS = [
   { label: "Triangle", value: "tri" },
 ];
 
+function StlModel({ url }) {
+  const geometry = useLoader(STLLoader, url);
+
+  return (
+    <Center>
+      <mesh geometry={geometry}>
+        <meshStandardMaterial color="#8aa4ff" metalness={0.1} roughness={0.5} />
+      </mesh>
+    </Center>
+  );
+}
+
 function App() {
   const [stepFile, setStepFile] = useState(null);
   const [meshSize, setMeshSize] = useState(1.0);
   const [outThickness, setOutThickness] = useState(0.87);
   const [infThickness, setInfThickness] = useState(0.45);
-
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState("");
   const [rows, setRows] = useState([{ infill: "grid", density: 20 }]);
+
   const [status, setStatus] = useState("");
   const [result, setResult] = useState(null);
+  const [currentJob, setCurrentJob] = useState(null);
+  const [polling, setPolling] = useState(false);
   const [previousJobs, setPreviousJobs] = useState([]);
 
   useEffect(() => {
@@ -23,13 +43,22 @@ function App() {
   }, []);
 
   async function loadPreviousJobs() {
-    const response = await fetch("/jobs");
-    const data = await response.json();
-    setPreviousJobs(data.jobs || []);
+    try {
+      const response = await fetch("/jobs");
+      const data = await response.json();
+      setPreviousJobs(data.jobs || []);
+    } catch {
+      setPreviousJobs([]);
+    }
   }
 
   function addRow() {
     setRows([...rows, { infill: "grid", density: 20 }]);
+  }
+
+  function getStepDownloadUrl(jobName, designName) {
+    const stepName = designName.replace("-", "") + ".step";
+    return `/jobs/${jobName}/infills/${stepName}/download`;
   }
 
   function updateRow(index, key, value) {
@@ -68,6 +97,34 @@ function App() {
     return `/jobs/${jobName}/infills/${stepName}`;
   }
 
+  async function pollJob(jobName) {
+    setPolling(true);
+
+    const intervalId = setInterval(async () => {
+      try {
+        const response = await fetch(`/jobs/${jobName}`);
+        const data = await response.json();
+
+        setResult(data);
+        setStatus(`Job ${jobName}: ${data.status}`);
+
+        if (data.status === "complete" || data.status === "failed") {
+          clearInterval(intervalId);
+          setPolling(false);
+
+          if (data.status === "complete") {
+            loadPreviousJobs();
+          }
+        }
+      } catch (error) {
+        clearInterval(intervalId);
+        setPolling(false);
+        setStatus("Could not check job status.");
+        setResult({ error: error.message });
+      }
+    }, 3000);
+  }
+
   async function submitJob(event) {
     event.preventDefault();
 
@@ -80,8 +137,9 @@ function App() {
     formData.append("step_file", stepFile);
     formData.append("sim_space", JSON.stringify(buildSimSpace()));
 
-    setStatus("Running simulation...");
+    setStatus("Submitting job...");
     setResult(null);
+    setCurrentJob(null);
 
     try {
       const response = await fetch("/run", {
@@ -90,16 +148,18 @@ function App() {
       });
 
       const data = await response.json();
-      console.log(data);
-      if (!response.ok || data.status !== "complete") {
-        setStatus("Simulation failed.");
+
+      if (!response.ok) {
+        setStatus("Failed to queue job.");
         setResult(data);
         return;
       }
 
-      setStatus("Simulation complete.");
+      setCurrentJob(data.job);
+      setStatus(`Job ${data.job} queued.`);
       setResult(data);
-      loadPreviousJobs();
+
+      pollJob(data.job);
     } catch (error) {
       setStatus("Could not connect to backend.");
       setResult({ error: error.message });
@@ -133,9 +193,28 @@ function App() {
               <td>{Number(row[2]).toFixed(4)}</td>
               <td>{Number(row[3]).toFixed(4)}</td>
               <td>
-                <a href={getStepUrl(jobName, row[0])} target="_blank">
-                  View STEP
-                </a>
+                <td>
+                  <div className="buttonGroup">
+                    <button
+                      type="button"
+                      className="viewerBtn"
+                      onClick={() => {
+                        setViewerUrl(getStepUrl(jobName, row[0]));
+                        setViewerTitle(`${jobName} - ${row[0]}`);
+                      }}
+                    >
+                      View Model
+                    </button>
+
+                    <a
+                      className="downloadBtn"
+                      href={getStepDownloadUrl(jobName, row[0])}
+                      download
+                    >
+                      Download STEP
+                    </a>
+                  </div>
+                </td>
               </td>
             </tr>
           ))}
@@ -270,8 +349,8 @@ function App() {
         </section>
 
         <section className="card submitCard">
-          <button type="submit" className="primaryBtn">
-            Run Job
+          <button type="submit" className="primaryBtn" disabled={polling}>
+            {polling ? "Running..." : "Run Job"}
           </button>
 
           {status && <p className="status">{status}</p>}
@@ -281,7 +360,37 @@ function App() {
       {result?.metrics && (
         <section className="resultsCard">
           <h2>Current Job Ranking</h2>
-          <RankingTable jobName={result.job} metrics={result.metrics} />
+          <RankingTable
+            jobName={result.job || currentJob}
+            metrics={result.metrics}
+          />
+        </section>
+      )}
+
+      {viewerUrl && (
+        <section className="resultsCard">
+          <div className="cardHeader">
+            <h2>Model Viewer: {viewerTitle}</h2>
+            <button
+              type="button"
+              className="secondaryBtn"
+              onClick={() => {
+                setViewerUrl(null);
+                setViewerTitle("");
+              }}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="viewerBox">
+            <Canvas camera={{ position: [0, -80, 60], fov: 45 }}>
+              <ambientLight intensity={0.6} />
+              <directionalLight position={[10, 10, 10]} intensity={1.2} />
+              <StlModel url={viewerUrl} />
+              <OrbitControls />
+            </Canvas>
+          </div>
         </section>
       )}
 
