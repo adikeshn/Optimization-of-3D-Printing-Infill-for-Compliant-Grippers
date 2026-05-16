@@ -5,8 +5,8 @@ import os
 
 def convert_to_mesh(job, infill_path,  mesh_size): 
 
-    STEP_path = f"job_{job}/infills/{infill_path}.step" 
-    if not os.path.exists(f"job_{job}/meshs/{infill_path}.msh"): 
+    STEP_path = f"./jobs/job_{job}/infills/{infill_path}.step" 
+    if not os.path.exists(f"./jobs/job_{job}/meshs/{infill_path}.msh"): 
         gmsh.initialize() 
         gmsh.option.setNumber("General.Terminal", 1) 
         gmsh.open(STEP_path)
@@ -23,7 +23,7 @@ def convert_to_mesh(job, infill_path,  mesh_size):
 
         # Sfepy is only compatible with MSH v2.2 
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2) 
-        gmsh.write(f"job_{job}/meshs/{infill_path}.msh") 
+        gmsh.write(f"./jobs/job_{job}/meshs/{infill_path}.msh") 
 
         gmsh.finalize() 
     else: print("mesh file already created")

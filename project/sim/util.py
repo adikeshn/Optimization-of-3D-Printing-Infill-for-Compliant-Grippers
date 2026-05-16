@@ -51,7 +51,15 @@ def cauchy_to_von_mises(cauchyArray):
     return (shear_constant+ sigma_constant) ** 0.5
 
 def minmax(x):
-        return (x - np.min(x)) / (np.max(x) - np.min(x))
+    x = np.array(x, dtype=float)
+
+    min_val = np.min(x)
+    max_val = np.max(x)
+
+    if max_val == min_val:
+        return np.zeros_like(x)
+
+    return (x - min_val) / (max_val - min_val)
 
 def computePseudoCGS(disp_flat, stress):
 

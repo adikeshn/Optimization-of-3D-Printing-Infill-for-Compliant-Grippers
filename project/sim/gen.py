@@ -1,10 +1,7 @@
 import cadquery as cq
-from jupyter_cadquery import show
-import numpy
 import matplotlib.pyplot as plt
 import math
 import numpy as np
-from scipy.optimize import curve_fit
 
 def create_triangle_outline(part, outer_thickness=1):
     bbox = part.val().BoundingBox()

@@ -1,18 +1,32 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from sim.sim import run_sims
 from pathlib import Path
+import shutil
+import json
 import os
 
 app = Flask(__name__)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DIST_DIR = os.path.join(BASE_DIR, "site", "dist")
+ASSETS_DIR = os.path.join(DIST_DIR, "assets")
+
 @app.route("/", methods=["GET"])
-def home():
-    return render_template("index.html")
+def index():
+    return send_from_directory(DIST_DIR, "index.html")
+
+@app.route("/assets/<path:path>", methods=["GET"])
+def assets(path):
+    return send_from_directory(ASSETS_DIR, path)
+
+@app.route("/<path:path>", methods=["GET"])
+def react_fallback(path):
+    return send_from_directory(DIST_DIR, "index.html")
 
 @app.route("/run", methods=["POST"])
 def run_simulation():
 
-    data = request.json
+    sim_space = json.loads(request.form["sim_space"])
     step_file = request.files["step_file"]
 
     base_dir = Path("./jobs")
@@ -31,13 +45,20 @@ def run_simulation():
 
     upload_path = f"./jobs/job_{job_num}/part.step"
     step_file.save(upload_path)
-
-    res = run_sims(job_num, data["sim_space"])
-
-    return jsonify({
-        "status": "complete",
-        "metrics": res
-    })
+    try: 
+        res = run_sims(job_num, sim_space)
+        return jsonify({
+            "status": "complete",
+            "metrics": res
+        })
+    except:
+        shutil.rmtree(f'./jobs/job_{job_num}')
+        return jsonify({
+            "status": "incomplete",
+            "metrics": None
+        })
+        
+    
 
 if __name__ == "__main__":
     app.run(debug=True)
