@@ -87,5 +87,4 @@ def run_sims(job, sim_space):
         cgs.append((minmax_disp[i] + (1-minmax_stress[i]))/2)
 
     sorted_with_index = (sorted(enumerate(cgs), key=lambda x: x[1], reverse=True))
-    print(cgs)
     return [[names[index], pseudo, disp[index], stress[index]] for (index, pseudo) in sorted_with_index]

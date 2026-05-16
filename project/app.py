@@ -7,21 +7,46 @@ import os
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DIST_DIR = os.path.join(BASE_DIR, "site", "dist")
-ASSETS_DIR = os.path.join(DIST_DIR, "assets")
+BASE_DIR = Path(__file__).resolve().parent
+JOBS_DIR = BASE_DIR / "jobs"
+SITE_DIST_DIR = BASE_DIR / "site" / "dist"
+SITE_ASSETS_DIR = SITE_DIST_DIR / "assets"
 
 @app.route("/", methods=["GET"])
 def index():
-    return send_from_directory(DIST_DIR, "index.html")
+    return send_from_directory(SITE_DIST_DIR, "index.html")
 
-@app.route("/assets/<path:path>", methods=["GET"])
-def assets(path):
-    return send_from_directory(ASSETS_DIR, path)
+@app.route("/jobs", methods=["GET"])
+def get_jobs():
+    JOBS_DIR.mkdir(exist_ok=True)
 
-@app.route("/<path:path>", methods=["GET"])
-def react_fallback(path):
-    return send_from_directory(DIST_DIR, "index.html")
+    jobs = []
+
+    for job_dir in sorted(JOBS_DIR.glob("job_*")):
+        metrics_path = job_dir / "metrics.json"
+
+        metrics = None
+        if metrics_path.exists():
+            with open(metrics_path, "r") as f:
+                metrics = json.load(f)
+
+        jobs.append({
+            "job": job_dir.name,
+            "metrics": metrics
+        })
+
+    return jsonify({
+        "jobs": jobs
+    })
+
+
+@app.route("/jobs/<job_name>/infills/<step_file>", methods=["GET"])
+def get_infill_step_file(job_name, step_file):
+    return send_from_directory(
+        JOBS_DIR / job_name / "infills",
+        step_file,
+        as_attachment=False
+    )
 
 @app.route("/run", methods=["POST"])
 def run_simulation():
@@ -47,8 +72,14 @@ def run_simulation():
     step_file.save(upload_path)
     try: 
         res = run_sims(job_num, sim_space)
+        metrics_path = JOBS_DIR / f"job_{job_num}" / "metrics.json"
+
+        with open(metrics_path, "w") as f:
+            json.dump(res, f, indent=2)
+
         return jsonify({
             "status": "complete",
+            "job": f"job_{job_num}",
             "metrics": res
         })
     except:
@@ -59,6 +90,15 @@ def run_simulation():
         })
         
     
+
+@app.route("/assets/<path:path>", methods=["GET"])
+def assets(path):
+    return send_from_directory(SITE_ASSETS_DIR, path)
+
+@app.route("/<path:path>", methods=["GET"])
+def react_fallback(path):
+    return send_from_directory(SITE_DIST_DIR, "index.html")
+
 
 if __name__ == "__main__":
     app.run(debug=True)

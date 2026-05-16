@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const INFILLS = [
   { label: "Grid", value: "grid" },
@@ -9,15 +9,24 @@ const INFILLS = [
 
 function App() {
   const [stepFile, setStepFile] = useState(null);
-
   const [meshSize, setMeshSize] = useState(1.0);
   const [outThickness, setOutThickness] = useState(0.87);
   const [infThickness, setInfThickness] = useState(0.45);
 
   const [rows, setRows] = useState([{ infill: "grid", density: 20 }]);
-
   const [status, setStatus] = useState("");
   const [result, setResult] = useState(null);
+  const [previousJobs, setPreviousJobs] = useState([]);
+
+  useEffect(() => {
+    loadPreviousJobs();
+  }, []);
+
+  async function loadPreviousJobs() {
+    const response = await fetch("/jobs");
+    const data = await response.json();
+    setPreviousJobs(data.jobs || []);
+  }
 
   function addRow() {
     setRows([...rows, { infill: "grid", density: 20 }]);
@@ -54,6 +63,11 @@ function App() {
     };
   }
 
+  function getStepUrl(jobName, designName) {
+    const stepName = designName.replace("-", "") + ".step";
+    return `/jobs/${jobName}/infills/${stepName}`;
+  }
+
   async function submitJob(event) {
     event.preventDefault();
 
@@ -62,13 +76,11 @@ function App() {
       return;
     }
 
-    const simSpace = buildSimSpace();
-
     const formData = new FormData();
     formData.append("step_file", stepFile);
-    formData.append("sim_space", JSON.stringify(simSpace));
+    formData.append("sim_space", JSON.stringify(buildSimSpace()));
 
-    setStatus("Submitting job...");
+    setStatus("Running simulation...");
     setResult(null);
 
     try {
@@ -78,19 +90,58 @@ function App() {
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        setStatus("Backend returned an error.");
+      console.log(data);
+      if (!response.ok || data.status !== "complete") {
+        setStatus("Simulation failed.");
         setResult(data);
         return;
       }
 
-      setStatus("Job submitted successfully.");
+      setStatus("Simulation complete.");
       setResult(data);
+      loadPreviousJobs();
     } catch (error) {
       setStatus("Could not connect to backend.");
       setResult({ error: error.message });
     }
+  }
+
+  function RankingTable({ jobName, metrics }) {
+    if (!metrics) {
+      return <p>No saved metrics for this job.</p>;
+    }
+
+    return (
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Design</th>
+            <th>Pseudo CGS</th>
+            <th>Displacement</th>
+            <th>Stress</th>
+            <th>STEP</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {metrics.map((row, index) => (
+            <tr key={`${jobName}-${index}`}>
+              <td>#{index + 1}</td>
+              <td>{row[0]}</td>
+              <td>{Number(row[1]).toFixed(4)}</td>
+              <td>{Number(row[2]).toFixed(4)}</td>
+              <td>{Number(row[3]).toFixed(4)}</td>
+              <td>
+                <a href={getStepUrl(jobName, row[0])} target="_blank">
+                  View STEP
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
   }
 
   return (
@@ -99,8 +150,8 @@ function App() {
         <p className="tag">Infill FEA Tool</p>
         <h1>Batch simulation setup</h1>
         <p>
-          Upload one base STEP file, choose multiple infill-density combos, then
-          submit the full design space to your Flask simulation route.
+          Upload one STEP file, test multiple infill-density combinations, and
+          view current or previous job rankings.
         </p>
       </section>
 
@@ -158,7 +209,7 @@ function App() {
                       type="number"
                       min="0"
                       max="100"
-                      step="1"
+                      step="0.01"
                       value={row.density}
                       onChange={(e) =>
                         updateRow(index, "density", e.target.value)
@@ -220,24 +271,43 @@ function App() {
 
         <section className="card submitCard">
           <button type="submit" className="primaryBtn">
-            Submit Job
+            Run Job
           </button>
 
           {status && <p className="status">{status}</p>}
-
-          <div className="preview">
-            <h3>Payload Preview</h3>
-            <pre>{JSON.stringify(buildSimSpace(), null, 2)}</pre>
-          </div>
-
-          {result && (
-            <div className="preview">
-              <h3>Backend Response</h3>
-              <pre>{JSON.stringify(result, null, 2)}</pre>
-            </div>
-          )}
         </section>
       </form>
+
+      {result?.metrics && (
+        <section className="resultsCard">
+          <h2>Current Job Ranking</h2>
+          <RankingTable jobName={result.job} metrics={result.metrics} />
+        </section>
+      )}
+
+      <section className="resultsCard">
+        <div className="cardHeader">
+          <h2>Previous Jobs</h2>
+          <button
+            type="button"
+            className="secondaryBtn"
+            onClick={loadPreviousJobs}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {previousJobs.length === 0 ? (
+          <p>No previous jobs found.</p>
+        ) : (
+          previousJobs.map((job) => (
+            <details key={job.job} className="jobDetails">
+              <summary>{job.job}</summary>
+              <RankingTable jobName={job.job} metrics={job.metrics} />
+            </details>
+          ))
+        )}
+      </section>
     </main>
   );
 }
