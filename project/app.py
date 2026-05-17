@@ -16,19 +16,14 @@ SITE_ASSETS_DIR = SITE_DIST_DIR / "assets"
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
-# Shared secret so only our Modal worker can call the /internal endpoints.
 WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
 
 
 def db():
-    # New short-lived connection per request. Simple and robust for low traffic.
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
-# ---------------------------------------------------------------------------
-# Static frontend
-# ---------------------------------------------------------------------------
-
+#frontend
 @app.route("/", methods=["GET"])
 def index():
     return send_from_directory(SITE_DIST_DIR, "index.html")
@@ -44,10 +39,7 @@ def assets(path):
     return send_from_directory(SITE_ASSETS_DIR, path)
 
 
-# ---------------------------------------------------------------------------
-# Public API (consumed by the React frontend)
-# ---------------------------------------------------------------------------
-
+#public API
 @app.route("/jobs", methods=["GET"])
 def get_jobs():
     with db() as conn:
@@ -108,7 +100,6 @@ def run_simulation():
 
         job_id = row["id"]
 
-        # Best-effort: kick the Modal worker so the job runs promptly.
         _trigger_worker()
 
         return jsonify({
@@ -128,7 +119,6 @@ def run_simulation():
 
 @app.route("/jobs/<job_name>/infills/<step_file>", methods=["GET"])
 def get_infill_stl_file(job_name, step_file):
-    # step_file looks like "grid20.step"; the frontend wants the STL to view.
     return _serve_artifact(job_name, step_file, want_kind="stl", as_download=False)
 
 
@@ -137,9 +127,7 @@ def download_infill_step_file(job_name, step_file):
     return _serve_artifact(job_name, step_file, want_kind="step", as_download=True)
 
 
-# ---------------------------------------------------------------------------
-# Internal API (consumed only by the Modal worker, protected by a shared secret)
-# ---------------------------------------------------------------------------
+#internal Modal API
 
 def _check_worker_auth():
     return WORKER_SECRET and request.headers.get("X-Worker-Secret") == WORKER_SECRET
@@ -182,6 +170,20 @@ def internal_claim():
         "base_part_b64": base64.b64encode(bytes(part["base_part"])).decode(),
     })
 
+def _trigger_worker():
+    # Best-effort nudge to the Modal worker. Never blocks job submission:
+    # the job is already safely 'queued' in Postgres, and the scheduled
+    # drain on Modal is the backstop if this fails.
+    url = os.environ.get("MODAL_TRIGGER_URL")
+    if not url:
+        return
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass  # swallow everything; the scheduled drain will catch it
 
 @app.route("/internal/jobs/<int:job_id>/complete", methods=["POST"])
 def internal_complete(job_id):
@@ -218,11 +220,7 @@ def internal_complete(job_id):
 
     return jsonify({"ok": True})
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
+#helpers
 def _job_id_from_name(job_name):
     # Accepts "job_12" or "12".
     try:
@@ -238,7 +236,6 @@ def _serve_artifact(job_name, step_file, want_kind, as_download):
     if job_id is None:
         return jsonify({"error": "bad job"}), 404
 
-    # "grid20.step" -> name "grid20"
     name = step_file
     if name.endswith(".step"):
         name = name[:-5]
@@ -267,7 +264,6 @@ def _serve_artifact(job_name, step_file, want_kind, as_download):
     return Response(data, mimetype=mimetype, headers=headers)
 
 
-# Catch-all React fallback. MUST be defined last.
 @app.route("/<path:path>", methods=["GET"])
 def react_fallback(path):
     return send_from_directory(SITE_DIST_DIR, "index.html")
