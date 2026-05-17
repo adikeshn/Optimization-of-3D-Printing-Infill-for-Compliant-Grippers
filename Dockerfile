@@ -13,12 +13,15 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
     ninja-build \
+    libgl1 \
     libglu1-mesa \
     libxrender1 \
     libxcursor1 \
     libxi6 \
     libxinerama1 \
     libxrandr2 \
+    libxft2 \
+    libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
