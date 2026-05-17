@@ -9,10 +9,6 @@ from pathlib import Path
 
 import modal
 
-# ---------------------------------------------------------------------------
-# Container image: your heavy scientific stack, same versions as before.
-# ---------------------------------------------------------------------------
-
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install(
@@ -30,7 +26,6 @@ image = (
         "matplotlib",
         "fastapi[standard]"
     )
-    # Bundle your local sim/ package into the image so the worker can import it.
     .add_local_python_source("sim")
 )
 
@@ -38,10 +33,6 @@ app = modal.App("infill-worker", image=image)
 
 SECRETS = modal.Secret.from_name("infill-secrets")
 
-
-# ---------------------------------------------------------------------------
-# Helpers for talking to the Render /internal API over plain HTTP.
-# ---------------------------------------------------------------------------
 
 def _http_post(url, payload, secret, timeout=120):
     data = json.dumps(payload).encode()
@@ -59,22 +50,19 @@ def _http_post(url, payload, secret, timeout=120):
         return json.loads(body) if body else {}
 
 
-# ---------------------------------------------------------------------------
-# The heavy worker. Drains the queue: claim -> run -> report, repeat.
-# ---------------------------------------------------------------------------
+
 
 @app.function(
     secrets=[SECRETS],
-    timeout=1800,        # 30 min per container; plenty for a batch of jobs
+    timeout=1800,        
     cpu=4.0,
-    memory=8192,         # 8 GB RAM — this is the whole point
-    max_containers=1,    # one worker at a time keeps it simple + cheap
+    memory=8192,         
+    max_containers=1,    
 )
 def process_jobs():
     base_url = os.environ["RENDER_BASE_URL"].rstrip("/")
     secret = os.environ["WORKER_SECRET"]
 
-    # Import here, inside the container, where the stack actually exists.
     from sim.sim import run_sims
     import cadquery as cq
 
@@ -123,12 +111,8 @@ def process_jobs():
 
 
 def _run_one_job(job_id, sim_space, base_part_bytes, cq, run_sims):
-    """Filesystem bridge. run_sims() reads from an ABSOLUTE path derived
-    from the sim package location (BASE_DIR/jobs/job_N/...), NOT from cwd.
-    So we must stage the files there, not in an unrelated temp dir."""
     import sim.sim as sim_module
 
-    # Mirror exactly how sim/sim.py computes its own JOBS_DIR.
     base_dir = Path(sim_module.__file__).resolve().parents[1]
     jobs_dir = base_dir / "jobs"
     job_root = jobs_dir / f"job_{job_id}"
@@ -137,20 +121,16 @@ def _run_one_job(job_id, sim_space, base_part_bytes, cq, run_sims):
 
     old_cwd = os.getcwd()
     try:
-        # Clean any stale dir from a previous run of the same id.
         if job_root.exists():
             shutil.rmtree(job_root, ignore_errors=True)
         infills_dir.mkdir(parents=True, exist_ok=True)
         meshs_dir.mkdir(parents=True, exist_ok=True)
 
-        # Input STEP exactly where run_sims will look for it.
         (job_root / "base_part.step").write_bytes(base_part_bytes)
 
-        # gmsh.py / sfepy.py additionally use RELATIVE ./jobs/... paths,
-        # so cwd must be base_dir (the folder that contains jobs/).
+
         os.chdir(base_dir)
 
-        # Your simulation code, called completely unmodified.
         metrics = run_sims(job_id, sim_space)
 
         artifacts = []
@@ -177,10 +157,6 @@ def _run_one_job(job_id, sim_space, base_part_bytes, cq, run_sims):
         os.chdir(old_cwd)
         shutil.rmtree(job_root, ignore_errors=True)
 
-# ---------------------------------------------------------------------------
-# Lightweight trigger. Render hits this; it spawns the heavy worker and
-# returns immediately so Render's request never blocks.
-# ---------------------------------------------------------------------------
 
 @app.function(secrets=[SECRETS])
 @modal.fastapi_endpoint(method="POST")
@@ -188,11 +164,6 @@ def trigger():
     process_jobs.spawn()
     return {"status": "triggered"}
 
-
-# ---------------------------------------------------------------------------
-# Safety net: every 15 minutes, drain anything that slipped through
-# (e.g. a lost trigger HTTP call). Costs ~1s of compute when idle.
-# ---------------------------------------------------------------------------
 
 @app.function(secrets=[SECRETS], schedule=modal.Period(minutes=15))
 def scheduled_drain():

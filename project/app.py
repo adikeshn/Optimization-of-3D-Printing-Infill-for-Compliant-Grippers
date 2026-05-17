@@ -171,9 +171,7 @@ def internal_claim():
     })
 
 def _trigger_worker():
-    # Best-effort nudge to the Modal worker. Never blocks job submission:
-    # the job is already safely 'queued' in Postgres, and the scheduled
-    # drain on Modal is the backstop if this fails.
+    
     url = os.environ.get("MODAL_TRIGGER_URL")
     if not url:
         return
@@ -183,7 +181,7 @@ def _trigger_worker():
                                      headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=5)
     except Exception:
-        pass  # swallow everything; the scheduled drain will catch it
+        pass  
 
 @app.route("/internal/jobs/<int:job_id>/complete", methods=["POST"])
 def internal_complete(job_id):
