@@ -32,4 +32,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY project/ .
 COPY --from=frontend /site/dist ./site/dist
 
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000", "--timeout", "120"]
+RUN chmod +x start.sh
+
+CMD ["./start.sh"]

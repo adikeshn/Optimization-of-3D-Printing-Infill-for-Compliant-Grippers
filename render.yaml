@@ -12,20 +12,6 @@ services:
           name: infill-redis
           property: connectionString
 
-  - type: worker
-    name: infill-worker
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: celery -A celery_app worker --loglevel=info
-    envVars:
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: infill-redis
-          property: connectionString
-
   - type: redis
     name: infill-redis
     plan: free
