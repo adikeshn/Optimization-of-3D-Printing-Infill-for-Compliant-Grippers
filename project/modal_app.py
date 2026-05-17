@@ -123,56 +123,59 @@ def process_jobs():
 
 
 def _run_one_job(job_id, sim_space, base_part_bytes, cq, run_sims):
-    """The filesystem bridge: recreate exactly the jobs/job_N/ layout that
-    the unchanged sim/ code expects, run it, read results back out."""
-    workdir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
-    old_cwd = os.getcwd()
+    """Filesystem bridge. run_sims() reads from an ABSOLUTE path derived
+    from the sim package location (BASE_DIR/jobs/job_N/...), NOT from cwd.
+    So we must stage the files there, not in an unrelated temp dir."""
+    import sim.sim as sim_module
 
+    # Mirror exactly how sim/sim.py computes its own JOBS_DIR.
+    base_dir = Path(sim_module.__file__).resolve().parents[1]
+    jobs_dir = base_dir / "jobs"
+    job_root = jobs_dir / f"job_{job_id}"
+    infills_dir = job_root / "infills"
+    meshs_dir = job_root / "meshs"
+
+    old_cwd = os.getcwd()
     try:
-        job_root = Path(workdir) / "jobs" / f"job_{job_id}"
-        infills_dir = job_root / "infills"
-        meshs_dir = job_root / "meshs"
+        # Clean any stale dir from a previous run of the same id.
+        if job_root.exists():
+            shutil.rmtree(job_root, ignore_errors=True)
         infills_dir.mkdir(parents=True, exist_ok=True)
         meshs_dir.mkdir(parents=True, exist_ok=True)
 
-        # The input STEP file exactly where run_sims looks for it.
+        # Input STEP exactly where run_sims will look for it.
         (job_root / "base_part.step").write_bytes(base_part_bytes)
 
-        # sim/ uses relative paths like ./jobs/job_N/... so we must run
-        # from the directory that contains the jobs/ folder.
-        os.chdir(workdir)
+        # gmsh.py / sfepy.py additionally use RELATIVE ./jobs/... paths,
+        # so cwd must be base_dir (the folder that contains jobs/).
+        os.chdir(base_dir)
 
         # Your simulation code, called completely unmodified.
         metrics = run_sims(job_id, sim_space)
 
-        # Collect every generated .step, plus an .stl rendering of each,
-        # as artifacts to ship back to Postgres.
         artifacts = []
         for step_path in sorted(infills_dir.glob("*.step")):
-            name = step_path.stem  # e.g. "grid20"
-            step_bytes = step_path.read_bytes()
+            name = step_path.stem
             artifacts.append({
                 "name": name,
                 "kind": "step",
-                "data_b64": base64.b64encode(step_bytes).decode(),
+                "data_b64": base64.b64encode(step_path.read_bytes()).decode(),
             })
 
             stl_path = infills_dir / f"{name}.stl"
             model = cq.importers.importStep(str(step_path))
             cq.exporters.export(model, str(stl_path))
-            stl_bytes = stl_path.read_bytes()
             artifacts.append({
                 "name": name,
                 "kind": "stl",
-                "data_b64": base64.b64encode(stl_bytes).decode(),
+                "data_b64": base64.b64encode(stl_path.read_bytes()).decode(),
             })
 
         return metrics, artifacts
 
     finally:
         os.chdir(old_cwd)
-        shutil.rmtree(workdir, ignore_errors=True)
-
+        shutil.rmtree(job_root, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
 # Lightweight trigger. Render hits this; it spawns the heavy worker and
