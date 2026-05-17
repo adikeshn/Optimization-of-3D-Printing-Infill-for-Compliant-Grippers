@@ -1,0 +1,9 @@
+flask
+gunicorn
+celery
+redis
+cadquery
+gmsh
+sfepy
+numpy
+matplotlib
