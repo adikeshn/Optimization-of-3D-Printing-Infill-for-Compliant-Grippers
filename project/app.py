@@ -1,153 +1,273 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
-from pathlib import Path
-import cadquery as cq
-from tasks import run_simulation_task
-import shutil
-import json
 import os
+import json
+import base64
+
+import psycopg
+from psycopg.rows import dict_row
+from flask import Flask, request, jsonify, send_from_directory, Response
 
 app = Flask(__name__)
 
+from pathlib import Path
+
 BASE_DIR = Path(__file__).resolve().parent
-JOBS_DIR = BASE_DIR / "jobs"
 SITE_DIST_DIR = BASE_DIR / "site" / "dist"
 SITE_ASSETS_DIR = SITE_DIST_DIR / "assets"
+
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+# Shared secret so only our Modal worker can call the /internal endpoints.
+WORKER_SECRET = os.environ.get("WORKER_SECRET", "")
+
+
+def db():
+    # New short-lived connection per request. Simple and robust for low traffic.
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+
+# ---------------------------------------------------------------------------
+# Static frontend
+# ---------------------------------------------------------------------------
 
 @app.route("/", methods=["GET"])
 def index():
     return send_from_directory(SITE_DIST_DIR, "index.html")
 
-@app.route("/jobs", methods=["GET"])
-def get_jobs():
-    JOBS_DIR.mkdir(exist_ok=True)
 
-    jobs = []
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
 
-    for job_dir in sorted(JOBS_DIR.glob("job_*")):
-        metrics_path = job_dir / "metrics.json"
-
-        metrics = None
-        if metrics_path.exists():
-            with open(metrics_path, "r") as f:
-                metrics = json.load(f)
-
-        jobs.append({
-            "job": job_dir.name,
-            "metrics": metrics
-        })
-
-    return jsonify({
-        "jobs": jobs
-    })
-
-@app.route("/jobs/<job_name>/infills/<step_file>/download", methods=["GET"])
-def download_infill_step_file(job_name, step_file):
-    return send_from_directory(
-        JOBS_DIR / job_name / "infills",
-        step_file,
-        as_attachment=True
-    )
-
-@app.route("/jobs/<job_name>/infills/<step_file>", methods=["GET"])
-def get_infill_stl_file(job_name, step_file):
-    step_dir = JOBS_DIR / job_name / "infills"
-    if not (step_dir / f"{step_file[:-5]}.stl").exists():
-        model = cq.importers.importStep(str(step_dir / step_file))
-        cq.exporters.export(model, str(step_dir / f"{step_file[:-5]}.stl"))
-     
-    return send_from_directory(
-        JOBS_DIR / job_name / "infills",
-        f"{step_file[:-5]}.stl",
-        as_attachment=False
-    )
-
-@app.route("/run", methods=["POST"])
-def run_simulation():
-    JOBS_DIR.mkdir(exist_ok=True)
-
-    existing_jobs = [
-        int(job.name.split("_")[1])
-        for job in JOBS_DIR.glob("job_*")
-        if job.name.split("_")[1].isdigit()
-    ]
-
-    job_num = max(existing_jobs, default=-1) + 1
-    job_name = f"job_{job_num}"
-    job_dir = JOBS_DIR / job_name
-    job_dir.mkdir(exist_ok=False)
-    (job_dir / "infills").mkdir(parents=True, exist_ok=True)
-    (job_dir / "meshs").mkdir(parents=True, exist_ok=True)
-    try:
-        step_file = request.files["step_file"]
-        sim_space = json.loads(request.form["sim_space"])
-
-        step_file.save(job_dir / "base_part.step")
-
-        with open(job_dir / "sim_space.json", "w") as f:
-            json.dump(sim_space, f, indent=2)
-
-        with open(job_dir / "status.json", "w") as f:
-            json.dump({"status": "queued", "error": None}, f, indent=2)
-
-        task = run_simulation_task.delay(job_num)
-
-        return jsonify({
-            "status": "queued",
-            "job": job_name,
-            "task_id": task.id,
-            "metrics": None,
-        })
-
-    except Exception as e:
-        shutil.rmtree(job_dir)
-
-        return jsonify({
-            "status": "failed",
-            "job": job_name,
-            "error": str(e),
-            "metrics": None,
-        }), 500
-
-@app.route("/jobs/<job_name>", methods=["GET"])
-def get_job(job_name):
-    job_dir = JOBS_DIR / job_name
-
-    if not job_dir.exists():
-        return jsonify({
-            "status": "not_found",
-            "job": job_name,
-            "metrics": None,
-        }), 404
-
-    status_path = job_dir / "status.json"
-    metrics_path = job_dir / "metrics.json"
-
-    status = "unknown"
-    error = None
-    metrics = None
-
-    if status_path.exists():
-        with open(status_path, "r") as f:
-            status_data = json.load(f)
-
-        status = status_data.get("status", "unknown")
-        error = status_data.get("error")
-
-    if metrics_path.exists():
-        with open(metrics_path, "r") as f:
-            metrics = json.load(f)
-
-    return jsonify({
-        "job": job_name,
-        "status": status,
-        "error": error,
-        "metrics": metrics,
-    })
 
 @app.route("/assets/<path:path>", methods=["GET"])
 def assets(path):
     return send_from_directory(SITE_ASSETS_DIR, path)
 
+
+# ---------------------------------------------------------------------------
+# Public API (consumed by the React frontend)
+# ---------------------------------------------------------------------------
+
+@app.route("/jobs", methods=["GET"])
+def get_jobs():
+    with db() as conn:
+        rows = conn.execute(
+            "select id, status, metrics from jobs order by id asc"
+        ).fetchall()
+
+    jobs = [
+        {
+            "job": f"job_{r['id']}",
+            "metrics": r["metrics"],
+        }
+        for r in rows
+    ]
+    return jsonify({"jobs": jobs})
+
+
+@app.route("/jobs/<job_name>", methods=["GET"])
+def get_job(job_name):
+    job_id = _job_id_from_name(job_name)
+    if job_id is None:
+        return jsonify({"status": "not_found", "job": job_name, "metrics": None}), 404
+
+    with db() as conn:
+        row = conn.execute(
+            "select id, status, error, metrics from jobs where id = %s",
+            (job_id,),
+        ).fetchone()
+
+    if row is None:
+        return jsonify({"status": "not_found", "job": job_name, "metrics": None}), 404
+
+    return jsonify({
+        "job": f"job_{row['id']}",
+        "status": row["status"],
+        "error": row["error"],
+        "metrics": row["metrics"],
+    })
+
+
+@app.route("/run", methods=["POST"])
+def run_simulation():
+    try:
+        step_file = request.files["step_file"]
+        sim_space = json.loads(request.form["sim_space"])
+        step_bytes = step_file.read()
+
+        with db() as conn:
+            row = conn.execute(
+                """
+                insert into jobs (status, sim_space, base_part)
+                values ('queued', %s, %s)
+                returning id
+                """,
+                (json.dumps(sim_space), step_bytes),
+            ).fetchone()
+            conn.commit()
+
+        job_id = row["id"]
+
+        # Best-effort: kick the Modal worker so the job runs promptly.
+        _trigger_worker()
+
+        return jsonify({
+            "status": "queued",
+            "job": f"job_{job_id}",
+            "metrics": None,
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "failed",
+            "job": None,
+            "error": str(e),
+            "metrics": None,
+        }), 500
+
+
+@app.route("/jobs/<job_name>/infills/<step_file>", methods=["GET"])
+def get_infill_stl_file(job_name, step_file):
+    # step_file looks like "grid20.step"; the frontend wants the STL to view.
+    return _serve_artifact(job_name, step_file, want_kind="stl", as_download=False)
+
+
+@app.route("/jobs/<job_name>/infills/<step_file>/download", methods=["GET"])
+def download_infill_step_file(job_name, step_file):
+    return _serve_artifact(job_name, step_file, want_kind="step", as_download=True)
+
+
+# ---------------------------------------------------------------------------
+# Internal API (consumed only by the Modal worker, protected by a shared secret)
+# ---------------------------------------------------------------------------
+
+def _check_worker_auth():
+    return WORKER_SECRET and request.headers.get("X-Worker-Secret") == WORKER_SECRET
+
+
+@app.route("/internal/claim", methods=["POST"])
+def internal_claim():
+    """Atomically grab the oldest queued job and mark it running."""
+    if not _check_worker_auth():
+        return jsonify({"error": "unauthorized"}), 401
+
+    with db() as conn:
+        row = conn.execute(
+            """
+            update jobs
+            set status = 'running', updated_at = now()
+            where id = (
+                select id from jobs
+                where status = 'queued'
+                order by id asc
+                for update skip locked
+                limit 1
+            )
+            returning id, sim_space
+            """
+        ).fetchone()
+        conn.commit()
+
+    if row is None:
+        return jsonify({"job": None})
+
+    with db() as conn:
+        part = conn.execute(
+            "select base_part from jobs where id = %s", (row["id"],)
+        ).fetchone()
+
+    return jsonify({
+        "job_id": row["id"],
+        "sim_space": row["sim_space"],
+        "base_part_b64": base64.b64encode(bytes(part["base_part"])).decode(),
+    })
+
+
+@app.route("/internal/jobs/<int:job_id>/complete", methods=["POST"])
+def internal_complete(job_id):
+    if not _check_worker_auth():
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(force=True)
+    status = payload.get("status", "complete")
+    metrics = payload.get("metrics")
+    error = payload.get("error")
+    artifacts = payload.get("artifacts", [])  # [{name, kind, data_b64}, ...]
+
+    with db() as conn:
+        conn.execute(
+            """
+            update jobs
+            set status = %s, metrics = %s, error = %s, updated_at = now()
+            where id = %s
+            """,
+            (status, json.dumps(metrics) if metrics is not None else None,
+             error, job_id),
+        )
+        for a in artifacts:
+            conn.execute(
+                """
+                insert into artifacts (job_id, name, kind, data)
+                values (%s, %s, %s, %s)
+                on conflict (job_id, name, kind) do update set data = excluded.data
+                """,
+                (job_id, a["name"], a["kind"],
+                 base64.b64decode(a["data_b64"])),
+            )
+        conn.commit()
+
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _job_id_from_name(job_name):
+    # Accepts "job_12" or "12".
+    try:
+        if job_name.startswith("job_"):
+            return int(job_name.split("_", 1)[1])
+        return int(job_name)
+    except (ValueError, IndexError):
+        return None
+
+
+def _serve_artifact(job_name, step_file, want_kind, as_download):
+    job_id = _job_id_from_name(job_name)
+    if job_id is None:
+        return jsonify({"error": "bad job"}), 404
+
+    # "grid20.step" -> name "grid20"
+    name = step_file
+    if name.endswith(".step"):
+        name = name[:-5]
+    elif name.endswith(".stl"):
+        name = name[:-4]
+
+    with db() as conn:
+        row = conn.execute(
+            "select data from artifacts where job_id = %s and name = %s and kind = %s",
+            (job_id, name, want_kind),
+        ).fetchone()
+
+    if row is None:
+        return jsonify({"error": "artifact not found"}), 404
+
+    data = bytes(row["data"])
+    if want_kind == "stl":
+        mimetype = "model/stl"
+    else:
+        mimetype = "application/step"
+
+    headers = {}
+    if as_download:
+        headers["Content-Disposition"] = f'attachment; filename="{name}.{want_kind}"'
+
+    return Response(data, mimetype=mimetype, headers=headers)
+
+
+# Catch-all React fallback. MUST be defined last.
 @app.route("/<path:path>", methods=["GET"])
 def react_fallback(path):
     return send_from_directory(SITE_DIST_DIR, "index.html")

@@ -5,15 +5,9 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    healthCheckPath: /health
     envVars:
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: infill-redis
-          property: connectionString
-
-  - type: redis
-    name: infill-redis
-    plan: free
-    maxmemoryPolicy: noeviction
-    ipAllowList: []
+      - key: DATABASE_URL
+        sync: false
+      - key: WORKER_SECRET
+        sync: false
